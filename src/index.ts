@@ -40,3 +40,4 @@ export {
   mailboxesForMessageId,
   type MessageIdIndex,
 } from "./compare/indexMessageIds.js";
+export * from "./copy/index.js";

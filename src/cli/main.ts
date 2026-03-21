@@ -14,6 +14,7 @@ import {
 import { jsonReplacer, stringifyReport } from "../report/jsonSerialize.js";
 import { compareAccountScans, type FolderMapping } from "../compare/compareReports.js";
 import { buildMessageIdIndex } from "../compare/indexMessageIds.js";
+import { cmdCopy } from "./copyCli.js";
 
 async function cmdUi(passwordEnv: string): Promise<void> {
   const { startUiServer } = await import("../ui-server/server.js");
@@ -33,6 +34,9 @@ Usage:
   imap-tool find <message-id-fragment> [--mailbox PATH] [--all-mailboxes]
   imap-tool compare <source.json> <dest.json> [--map mapping.json] [--pretty]
   imap-tool index-message-ids <report.json> [--pretty]
+  imap-tool copy run --spec <migrate.json> --store <job.sqlite> [--concurrency N] [--verbose]
+  imap-tool copy status --store <job.sqlite> [--pretty]
+  imap-tool copy pause|resume --store <job.sqlite>
 
 Environment: IMAP_HOST, IMAP_USER, IMAP_PASS (or --password-env), IMAP_PORT, IMAP_SECURE, IMAP_TLS_REJECT_UNAUTHORIZED
 `);
@@ -79,6 +83,18 @@ function argvFlags(argv: string[]): {
       }
       if (a === "--limit") {
         opts.set("--limit", argv[++i] ?? "");
+        continue;
+      }
+      if (a === "--spec") {
+        opts.set("--spec", argv[++i] ?? "");
+        continue;
+      }
+      if (a === "--store") {
+        opts.set("--store", argv[++i] ?? "");
+        continue;
+      }
+      if (a === "--concurrency") {
+        opts.set("--concurrency", argv[++i] ?? "");
         continue;
       }
       flags.add(a);
@@ -404,6 +420,14 @@ async function main(): Promise<void> {
       case "ui":
         await cmdUi(passwordEnv);
         break;
+      case "copy": {
+        const sub = rest[1];
+        if (!sub) {
+          throw new ConfigError("copy requires a subcommand: run|status|pause|resume");
+        }
+        await cmdCopy(sub, flags, opts);
+        break;
+      }
       default:
         usage();
         process.exit(1);
