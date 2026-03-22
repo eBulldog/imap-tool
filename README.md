@@ -1,8 +1,8 @@
 # imap-tool
 
-TypeScript CLI and library for **IMAP metadata** (counts, sizes, UIDs, envelopes) and **migration-style comparison**. It does not render email; it produces JSON reports you can diff.
+TypeScript CLI and library for **IMAP metadata** (counts, sizes, UIDs, envelopes), **migration-style comparison**, and optional **verified provider-to-provider copy** (FETCH → SHA-256 → APPEND → re-FETCH → hash match, with SQLite checkpoints). It does not render email; it produces JSON reports you can diff.
 
-See `PLAN.md` for architecture and goals.
+See `PLAN.md` for architecture, goals, and what is still planned (e.g. `/copy` UI).
 
 ## Requirements
 
@@ -121,14 +121,63 @@ npx imap-tool compare source.json dest.json --map folders.json
 
 Build a `messageIdNormalized → mailbox paths[]` index from an existing `scan-all` report (UC-1 helper).
 
+### `copy` — verified two-host migration (CLI)
+
+Copies messages **from one IMAP account to another** with per-message **SHA-256** proof: full raw message on the source, **APPEND** on the destination, then full raw **FETCH** on the destination and a hash match. State lives in a **SQLite** file (`--store`) so you can stop and resume; use **`copy pause` / `copy resume`** from another terminal while **`copy run`** is active (the runner polls a flag in the DB).
+
+**Spec JSON** holds **both** connections and the folder map (passwords are in this file — use strict permissions, e.g. `chmod 600 migrate.json`).
+
+```bash
+npx imap-tool copy run --spec migrate.json --store job.sqlite --concurrency 2
+npx imap-tool copy status --store job.sqlite --pretty
+npx imap-tool copy pause --store job.sqlite
+npx imap-tool copy resume --store job.sqlite
+```
+
+Example `migrate.json`:
+
+```json
+{
+  "version": 1,
+  "source": { "host": "old.example.com", "user": "you", "pass": "secret" },
+  "destination": { "host": "new.example.com", "user": "you", "pass": "secret" },
+  "folders": [{ "source": "INBOX", "destination": "INBOX" }],
+  "concurrency": 2,
+  "maxRetries": 5
+}
+```
+
+- **First run** needs `--spec`; later runs on the same `--store` reuse the embedded spec (omit `--spec` or pass the same file).
+- **Destination mailboxes** must exist (or be created by your host) before `APPEND`; the tool does not create folders yet.
+- **Interrupt:** `SIGINT` finishes in-flight messages then exits; run `copy run` again to continue from the store.
+- **Duplicates:** if the destination already has the same **Message-ID** and **RFC822.SIZE**, the row is verified and marked done without a second append when possible.
+
+Library entrypoints: `runCopyJob`, `readCopyStatus`, `openCopyCheckpointStore`, etc. — see `src/copy/` and `src/index.ts`.
+
 ## Migration runbook (summary)
+
+**Metadata-only verification**
 
 1. **Baseline:** `imap-tool scan-all -o source.json` on the old server.
 2. Migrate with your tool of choice.
 3. **Destination:** `imap-tool scan-all -o dest.json` on the new server.
 4. **Compare:** `imap-tool compare source.json dest.json --map map.json`.
 
-Fingerprints use `messageId` + `rfc822Size` + `internalDate` (see `fingerprintWeak` in JSON). Duplicate `Message-ID` headers are possible; use `--content-sha256` on scans when you need byte-level identity (expensive).
+**Verified copy inside this tool**
+
+1. Prepare `migrate.json` (source, destination, `folders` map).
+2. `imap-tool copy run --spec migrate.json --store job.sqlite` (repeat until all rows are `done` or review `failed` via `copy status`).
+3. Optionally still run **`scan-all` + `compare`** on both sides for a mailbox-level diff.
+
+Fingerprints use `messageId` + `rfc822Size` + `internalDate` (see `fingerprintWeak` in JSON). Duplicate `Message-ID` headers are possible; use `--content-sha256` on scans when you need byte-level identity from reports alone (expensive). The **`copy`** command always hashes full RFC822 for each migrated message.
+
+## Copy feature status (vs. `PLAN.md` §10)
+
+| Phase | Status |
+|-------|--------|
+| **F** — Library + CLI + SQLite checkpoints + bulletproof profile | **Done** (unit tests cover the store; use a real lab for end-to-end kill/resume). |
+| **G** — Streaming hash (lower peak memory per message), explicit **APPENDLIMIT** handling, tuned stress on huge folders | **Not done** — concurrency bounds memory today (`workers × largest message`). |
+| **H** — Web UI `/copy` + `GET /api/copy/jobs/:id` (and related APIs) | **Not done** — copy is CLI + library only for now. |
 
 ## Integration tests
 
