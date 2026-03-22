@@ -201,3 +201,41 @@ export function setCopyPaused(
     store.close();
   }
 }
+
+export interface CopyFailureReasonRow {
+  reason: string;
+  count: number;
+}
+
+export interface CopyFailureSampleRow {
+  sourceMailbox: string;
+  sourceUid: number;
+  failReason: string;
+}
+
+export interface CopyFailureDetails {
+  reasons: CopyFailureReasonRow[];
+  samples: CopyFailureSampleRow[];
+}
+
+/**
+ * Reads grouped failure messages and sample rows for UI / CLI diagnostics.
+ */
+export function readCopyFailureDetails(
+  storePath: string,
+  jobId = DEFAULT_JOB_ID,
+  opts?: { maxReasonGroups?: number; sampleLimit?: number }
+): CopyFailureDetails {
+  const store = openCopyCheckpointStore(storePath);
+  try {
+    if (!store.getJob(jobId)) {
+      throw new ConfigError("no copy job in store");
+    }
+    return {
+      reasons: store.failureReasonSummary(jobId, opts?.maxReasonGroups ?? 25),
+      samples: store.failureSamples(jobId, opts?.sampleLimit ?? 50),
+    };
+  } finally {
+    store.close();
+  }
+}

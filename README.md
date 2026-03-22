@@ -23,7 +23,7 @@ React + Fastify. **Default bind `0.0.0.0`** (all IPv4); stderr lists LAN URLs. *
 
 Interactive flows use **`POST /api/session/*`**, **`POST /api/compare/*`**, and **`/api/copy/jobs*`** with JSON bodies (host, user, pass, TLS flags). Passwords are sent to your imap-tool process over **HTTP** unless you terminate TLS in front — use a trusted LAN or put nginx/Caddy in front for HTTPS.
 
-Copy jobs persist under **`IMAP_COPY_JOB_DIR`** (default: a subdirectory of the system temp dir, e.g. `/tmp/imap-tool-copy-jobs` on Linux). Each job is a UUID folder with `spec.json` and `job.sqlite`.
+Copy jobs persist under **`IMAP_COPY_JOB_DIR`** (default: a subdirectory of the system temp dir, e.g. `/tmp/imap-tool-copy-jobs` on Linux). Each job is a UUID folder with `spec.json` and `job.sqlite`. **`GET /api/copy/jobs/:id`** includes **`failures`** (grouped reasons + sample rows) when `stats.failed > 0`. Use **Test connection** on `/copy` before starting a job; CLI: `copy status --store … --verbose` prints failure groups and samples.
 
 ```bash
 npm run build:all

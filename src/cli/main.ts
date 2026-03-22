@@ -35,7 +35,7 @@ Usage:
   imap-tool compare <source.json> <dest.json> [--map mapping.json] [--pretty]
   imap-tool index-message-ids <report.json> [--pretty]
   imap-tool copy run --spec <migrate.json> --store <job.sqlite> [--concurrency N] [--verbose]
-  imap-tool copy status --store <job.sqlite> [--pretty]
+  imap-tool copy status --store <job.sqlite> [--pretty] [--verbose]
   imap-tool copy pause|resume --store <job.sqlite>
 
 Environment: IMAP_HOST, IMAP_USER, IMAP_PASS (or --password-env), IMAP_PORT, IMAP_SECURE, IMAP_TLS_REJECT_UNAUTHORIZED

@@ -3,6 +3,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openCopyCheckpointStore } from "../src/copy/checkpointStore.js";
+import { readCopyFailureDetails } from "../src/copy/jobRunner.js";
 import { DEFAULT_JOB_ID, type CopySpecFileV1 } from "../src/copy/jobTypes.js";
 
 let dir: string;
@@ -91,5 +92,45 @@ describe("CopyCheckpointStore", () => {
     } finally {
       store.close();
     }
+  });
+
+  it("failureReasonSummary and readCopyFailureDetails group by message", () => {
+    dir = mkdtempSync(join(tmpdir(), "imap-copy-"));
+    const path = join(dir, "job.sqlite");
+    const spec: CopySpecFileV1 = {
+      version: 1,
+      source: { host: "a", user: "u", pass: "p" },
+      destination: { host: "b", user: "u", pass: "p" },
+      folders: [{ source: "X", destination: "Y" }],
+    };
+    const store = openCopyCheckpointStore(path);
+    try {
+      store.upsertJob(DEFAULT_JOB_ID, spec);
+      store.insertPendingItems(DEFAULT_JOB_ID, [
+        { sourceMailbox: "X", destMailbox: "Y", sourceUid: 1 },
+        { sourceMailbox: "X", destMailbox: "Y", sourceUid: 2 },
+        { sourceMailbox: "X", destMailbox: "Y", sourceUid: 3 },
+      ]);
+      const a = store.claimNext(DEFAULT_JOB_ID)!;
+      store.markTerminalFailure(a.id, "quota");
+      const b = store.claimNext(DEFAULT_JOB_ID)!;
+      store.markTerminalFailure(b.id, "quota");
+      const c = store.claimNext(DEFAULT_JOB_ID)!;
+      store.markTerminalFailure(c.id, "no mailbox");
+
+      const summary = store.failureReasonSummary(DEFAULT_JOB_ID);
+      expect(summary).toEqual(
+        expect.arrayContaining([
+          { reason: "quota", count: 2 },
+          { reason: "no mailbox", count: 1 },
+        ])
+      );
+    } finally {
+      store.close();
+    }
+
+    const details = readCopyFailureDetails(path);
+    expect(details.reasons.length).toBe(2);
+    expect(details.samples.length).toBe(3);
   });
 });

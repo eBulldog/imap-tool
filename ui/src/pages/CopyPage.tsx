@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { getJson, postJson } from "../api";
 import { useServers } from "../context/ServersContext";
-import { formToConnectionBody } from "../types";
+import { formToConnectionBody, type ServerForm } from "../types";
 
 const defaultFoldersJson = `[
   { "source": "INBOX", "destination": "INBOX" }
@@ -18,6 +18,11 @@ type CopyStats = {
   total: number;
 };
 
+type FailureDetails = {
+  reasons: { reason: string; count: number }[];
+  samples: { sourceMailbox: string; sourceUid: number; failReason: string }[];
+};
+
 type JobPoll = {
   jobId: string;
   phase: string;
@@ -30,12 +35,47 @@ type JobPoll = {
   jobsDir?: string;
   dataDir?: string;
   lastRunFinishedAt?: string;
+  failures: FailureDetails | null;
 };
 
 function statLine(label: string, n: number, total: number): string {
   if (total <= 0) return `${label}: ${n}`;
   const pct = Math.round((n / total) * 1000) / 10;
   return `${label}: ${n} (${pct}%)`;
+}
+
+function TestImapConnection({ form, label }: { form: ServerForm; label: string }) {
+  const [busy, setBusy] = useState(false);
+  const [ok, setOk] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    setOk(null);
+    setErr(null);
+    try {
+      const j = await postJson<{ capabilities?: string[]; host?: string; user?: string }>(
+        "/api/session/ping",
+        formToConnectionBody(form)
+      );
+      const n = j.capabilities?.length ?? 0;
+      setOk(`Connected as ${j.user} @ ${j.host} — ${n} capabilities advertised.`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="copy-connection-test">
+      <button type="button" disabled={busy} onClick={() => void run()}>
+        Test connection — {label}
+      </button>
+      {ok && <p className="ok-box">{ok}</p>}
+      {err && <p className="err-box copy-err-tight">{err}</p>}
+    </div>
+  );
 }
 
 export default function CopyPage() {
@@ -154,6 +194,7 @@ export default function CopyPage() {
         <strong>Security:</strong> credentials are sent to this imap-tool process only (not to the
         browser’s origin unless you use the dev proxy). Use a trusted network or TLS in front. Job
         state and spec files are stored under <code>IMAP_COPY_JOB_DIR</code> (default: system temp).
+        Use <strong>Test connection</strong> on each server before starting a copy.
       </div>
 
       <div className="copy-grid">
@@ -212,6 +253,7 @@ export default function CopyPage() {
               Verify TLS cert
             </label>
           </div>
+          <TestImapConnection form={serverA} label="source" />
         </section>
 
         <section className="panel">
@@ -269,6 +311,7 @@ export default function CopyPage() {
               Verify TLS cert
             </label>
           </div>
+          <TestImapConnection form={serverB} label="destination" />
         </section>
       </div>
 
@@ -343,6 +386,63 @@ export default function CopyPage() {
               <li>{statLine("Failed", s.failed, total)}</li>
               <li>Total: {s.total}</li>
             </ul>
+          )}
+          {s && s.failed > 0 && (
+            <div className="copy-failures">
+              <h3>Why messages failed</h3>
+              {poll?.failures && poll.failures.reasons.length > 0 ? (
+                <>
+                  <p className="hint">
+                    Errors are stored per message on the server. Fix the cause (wrong folder, quota,
+                    TLS, etc.), then run a new job or adjust the store via CLI if you are retrying the
+                    same job.
+                  </p>
+                  <table className="copy-fail-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Count</th>
+                        <th scope="col">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {poll.failures.reasons.map((r, i) => (
+                        <tr key={i}>
+                          <td>{r.count}</td>
+                          <td className="mono wrap-break fail-reason-cell">{r.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {poll.failures.samples.length > 0 && (
+                    <>
+                      <h4>Sample rows</h4>
+                      <table className="copy-fail-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Source folder</th>
+                            <th scope="col">UID</th>
+                            <th scope="col">Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {poll.failures.samples.map((r, i) => (
+                            <tr key={i}>
+                              <td className="mono">{r.sourceMailbox}</td>
+                              <td>{r.sourceUid}</td>
+                              <td className="mono wrap-break fail-reason-cell">{r.failReason}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </>
+                  )}
+                </>
+              ) : (
+                <p className="hint">
+                  Failure details are loading or unavailable. Click <strong>Refresh now</strong>.
+                </p>
+              )}
+            </div>
           )}
           <div className="row-actions wrap">
             <button type="button" onClick={() => void postJobAction("/pause")}>

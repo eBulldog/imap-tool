@@ -323,6 +323,56 @@ export class CopyCheckpointStore {
     }
     return s;
   }
+
+  /**
+   * Groups failed rows by stored `fail_reason` (newest groups first by count).
+   */
+  failureReasonSummary(
+    jobId = DEFAULT_JOB_ID,
+    maxGroups = 25
+  ): { reason: string; count: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT fail_reason, COUNT(*) AS c
+         FROM copy_item
+         WHERE job_id = ? AND status = 'failed'
+         GROUP BY fail_reason
+         ORDER BY c DESC
+         LIMIT ?`
+      )
+      .all(jobId, maxGroups) as { fail_reason: string | null; c: number }[];
+    return rows.map((r) => ({
+      reason: r.fail_reason?.trim() ? r.fail_reason : "(no reason recorded)",
+      count: r.c,
+    }));
+  }
+
+  /**
+   * Example failed rows for debugging (stable order by row id).
+   */
+  failureSamples(
+    jobId = DEFAULT_JOB_ID,
+    limit = 50
+  ): { sourceMailbox: string; sourceUid: number; failReason: string }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT source_mailbox, source_uid, fail_reason
+         FROM copy_item
+         WHERE job_id = ? AND status = 'failed'
+         ORDER BY id
+         LIMIT ?`
+      )
+      .all(jobId, limit) as {
+        source_mailbox: string;
+        source_uid: number;
+        fail_reason: string | null;
+      }[];
+    return rows.map((r) => ({
+      sourceMailbox: r.source_mailbox,
+      sourceUid: r.source_uid,
+      failReason: r.fail_reason?.trim() ? r.fail_reason : "(no reason recorded)",
+    }));
+  }
 }
 
 /**

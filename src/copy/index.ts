@@ -18,7 +18,11 @@ export {
   populateCopyItemsFromSource,
   runCopyJob,
   readCopyStatus,
+  readCopyFailureDetails,
   setCopyPaused,
   type RunCopyJobOptions,
   type CopyStatusSnapshot,
+  type CopyFailureDetails,
+  type CopyFailureReasonRow,
+  type CopyFailureSampleRow,
 } from "./jobRunner.js";

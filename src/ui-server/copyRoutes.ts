@@ -5,7 +5,12 @@ import path from "path";
 import type { FastifyInstance } from "fastify";
 import { ConfigError } from "../imap/config.js";
 import { parseCopySpecJson } from "../copy/spec.js";
-import { readCopyStatus, runCopyJob, setCopyPaused } from "../copy/jobRunner.js";
+import {
+  readCopyFailureDetails,
+  readCopyStatus,
+  runCopyJob,
+  setCopyPaused,
+} from "../copy/jobRunner.js";
 import type { CopySpecFileV1 } from "../copy/jobTypes.js";
 import { parseImapConnectionBody } from "./connBody.js";
 
@@ -211,6 +216,15 @@ export function registerCopyRoutes(app: FastifyInstance): void {
       /* */
     }
 
+    let failures: ReturnType<typeof readCopyFailureDetails> | null = null;
+    if (snapshot?.stats && snapshot.stats.failed > 0) {
+      try {
+        failures = readCopyFailureDetails(storePath);
+      } catch {
+        failures = null;
+      }
+    }
+
     return {
       jobId: id,
       jobsDir,
@@ -224,6 +238,7 @@ export function registerCopyRoutes(app: FastifyInstance): void {
       paused: snapshot?.paused ?? false,
       createdAt: snapshot?.createdAt ?? "",
       stats: snapshot?.stats ?? null,
+      failures,
     };
   });
 
