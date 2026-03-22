@@ -325,22 +325,20 @@ export class CopyCheckpointStore {
   }
 
   /**
-   * Groups failed rows by stored `fail_reason` (newest groups first by count).
+   * Groups failed rows by `fail_reason` for the whole store (one migration job per file).
+   * Intentionally **not** filtered by `job_id` so diagnostics match rows even if `job_id` drifted.
    */
-  failureReasonSummary(
-    jobId = DEFAULT_JOB_ID,
-    maxGroups = 25
-  ): { reason: string; count: number }[] {
+  failureReasonSummary(maxGroups = 25): { reason: string; count: number }[] {
     const rows = this.db
       .prepare(
         `SELECT fail_reason, COUNT(*) AS c
          FROM copy_item
-         WHERE job_id = ? AND status = 'failed'
+         WHERE status = 'failed'
          GROUP BY fail_reason
          ORDER BY c DESC
          LIMIT ?`
       )
-      .all(jobId, maxGroups) as { fail_reason: string | null; c: number }[];
+      .all(maxGroups) as { fail_reason: string | null; c: number }[];
     return rows.map((r) => ({
       reason: r.fail_reason?.trim() ? r.fail_reason : "(no reason recorded)",
       count: r.c,
@@ -348,21 +346,18 @@ export class CopyCheckpointStore {
   }
 
   /**
-   * Example failed rows for debugging (stable order by row id).
+   * Example failed rows (stable order by row id), all failed rows in the file.
    */
-  failureSamples(
-    jobId = DEFAULT_JOB_ID,
-    limit = 50
-  ): { sourceMailbox: string; sourceUid: number; failReason: string }[] {
+  failureSamples(limit = 50): { sourceMailbox: string; sourceUid: number; failReason: string }[] {
     const rows = this.db
       .prepare(
         `SELECT source_mailbox, source_uid, fail_reason
          FROM copy_item
-         WHERE job_id = ? AND status = 'failed'
+         WHERE status = 'failed'
          ORDER BY id
          LIMIT ?`
       )
-      .all(jobId, limit) as {
+      .all(limit) as {
         source_mailbox: string;
         source_uid: number;
         fail_reason: string | null;
@@ -372,6 +367,24 @@ export class CopyCheckpointStore {
       sourceUid: r.source_uid,
       failReason: r.fail_reason?.trim() ? r.fail_reason : "(no reason recorded)",
     }));
+  }
+
+  /** Count failed rows in file (ignores job_id). */
+  countFailedRowsUnscoped(): number {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS c FROM copy_item WHERE status = 'failed'`)
+      .get() as { c: number };
+    return row.c;
+  }
+
+  /** Distinct job_id on failed rows (debugging). */
+  distinctFailedJobIds(): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT job_id FROM copy_item WHERE status = 'failed' GROUP BY job_id ORDER BY COUNT(*) DESC`
+      )
+      .all() as { job_id: string }[];
+    return rows.map((r) => r.job_id);
   }
 }
 

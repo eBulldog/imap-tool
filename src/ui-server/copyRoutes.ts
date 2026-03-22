@@ -217,11 +217,13 @@ export function registerCopyRoutes(app: FastifyInstance): void {
     }
 
     let failures: ReturnType<typeof readCopyFailureDetails> | null = null;
+    let failureQueryError: string | undefined;
     if (snapshot?.stats && snapshot.stats.failed > 0) {
       try {
         failures = readCopyFailureDetails(storePath);
-      } catch {
+      } catch (e) {
         failures = null;
+        failureQueryError = e instanceof Error ? e.message : String(e);
       }
     }
 
@@ -239,6 +241,7 @@ export function registerCopyRoutes(app: FastifyInstance): void {
       createdAt: snapshot?.createdAt ?? "",
       stats: snapshot?.stats ?? null,
       failures,
+      failureQueryError,
     };
   });
 

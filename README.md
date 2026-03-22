@@ -169,7 +169,7 @@ Library entrypoints: `runCopyJob`, `readCopyStatus`, `openCopyCheckpointStore`, 
 **Verified copy inside this tool**
 
 1. **CLI:** prepare `migrate.json` (source, destination, `folders` map), then `imap-tool copy run --spec migrate.json --store job.sqlite` (repeat until all rows are `done` or review `failed` via `copy status`).
-2. **UI:** `npm run build:all`, `imap-tool ui`, open **`/copy`** — Server A = source, Server B = destination, edit folder JSON, **Start copy job**. Use **List jobs** after a server restart, then **Start / resume run** on the same job id.
+2. **UI:** `npm run build:all`, `imap-tool ui`, open **`/copy`** — Server A = source, Server B = destination. Use **Load folders from source**, tick folders, edit **destination path** to rename on the new server (or switch to **JSON** for a raw map). **Start copy job**. Failed jobs show grouped IMAP/error text from SQLite; use **List jobs** after restart, then **Start / resume run**.
 3. Optionally still run **`scan-all` + `compare`** on both sides for a mailbox-level diff.
 
 Fingerprints use `messageId` + `rfc822Size` + `internalDate` (see `fingerprintWeak` in JSON). Duplicate `Message-ID` headers are possible; use `--content-sha256` on scans when you need byte-level identity from reports alone (expensive). The **`copy`** command always hashes full RFC822 for each migrated message.

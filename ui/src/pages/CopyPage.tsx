@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { getJson, postJson } from "../api";
 import { useServers } from "../context/ServersContext";
-import { formToConnectionBody, type ServerForm } from "../types";
+import { formToConnectionBody, type ListMb, type ServerForm } from "../types";
 
 const defaultFoldersJson = `[
   { "source": "INBOX", "destination": "INBOX" }
@@ -21,6 +21,8 @@ type CopyStats = {
 type FailureDetails = {
   reasons: { reason: string; count: number }[];
   samples: { sourceMailbox: string; sourceUid: number; failReason: string }[];
+  failedRowCount?: number;
+  failedJobIds?: string[];
 };
 
 type JobPoll = {
@@ -36,7 +38,10 @@ type JobPoll = {
   dataDir?: string;
   lastRunFinishedAt?: string;
   failures: FailureDetails | null;
+  failureQueryError?: string;
 };
+
+type FolderMapRow = { source: string; dest: string; include: boolean };
 
 function statLine(label: string, n: number, total: number): string {
   if (total <= 0) return `${label}: ${n}`;
@@ -82,6 +87,10 @@ export default function CopyPage() {
   const { serverA, serverB, setServerA, setServerB } = useServers();
   const [searchParams, setSearchParams] = useSearchParams();
   const [foldersJson, setFoldersJson] = useState(defaultFoldersJson);
+  const [folderMapMode, setFolderMapMode] = useState<"picker" | "json">("picker");
+  const [folderRows, setFolderRows] = useState<FolderMapRow[]>([]);
+  const [mbLoadBusy, setMbLoadBusy] = useState(false);
+  const [mbLoadErr, setMbLoadErr] = useState<string | null>(null);
   const [concurrency, setConcurrency] = useState("2");
   const [maxRetries, setMaxRetries] = useState("5");
   const [jobId, setJobId] = useState<string | null>(() => searchParams.get("job"));
@@ -126,14 +135,60 @@ export default function CopyPage() {
     return () => window.clearInterval(t);
   }, [jobId, fetchJob]);
 
+  const loadSourceMailboxes = async () => {
+    setMbLoadErr(null);
+    setMbLoadBusy(true);
+    try {
+      const j = await postJson<{ mailboxes: ListMb[] }>(
+        "/api/session/mailboxes",
+        formToConnectionBody(serverA)
+      );
+      const paths = j.mailboxes.map((m) => m.path).sort((a, b) => a.localeCompare(b));
+      setFolderRows(paths.map((source) => ({ source, dest: source, include: false })));
+    } catch (e) {
+      setMbLoadErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMbLoadBusy(false);
+    }
+  };
+
   const startCopy = async () => {
     setJobErr(null);
-    let folders: unknown;
-    try {
-      folders = JSON.parse(foldersJson) as unknown;
-    } catch {
-      setJobErr("Folder map must be valid JSON.");
-      return;
+    let folders: Array<{ source: string; destination: string }>;
+    if (folderMapMode === "json") {
+      try {
+        const parsed = JSON.parse(foldersJson) as unknown;
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          setJobErr("Folder map JSON must be a non-empty array.");
+          return;
+        }
+        folders = [];
+        for (const item of parsed) {
+          if (!item || typeof item !== "object") {
+            setJobErr("Each folder entry must be an object with source and destination.");
+            return;
+          }
+          const o = item as Record<string, unknown>;
+          const source = typeof o.source === "string" ? o.source.trim() : "";
+          const destination = typeof o.destination === "string" ? o.destination.trim() : "";
+          if (!source || !destination) {
+            setJobErr("Each folder entry needs non-empty source and destination strings.");
+            return;
+          }
+          folders.push({ source, destination });
+        }
+      } catch {
+        setJobErr("Folder map must be valid JSON.");
+        return;
+      }
+    } else {
+      folders = folderRows
+        .filter((r) => r.include && r.source.trim() && r.dest.trim())
+        .map((r) => ({ source: r.source.trim(), destination: r.dest.trim() }));
+      if (folders.length === 0) {
+        setJobErr("Select at least one folder to copy, or switch to JSON mode.");
+        return;
+      }
     }
     setBusy(true);
     try {
@@ -316,18 +371,131 @@ export default function CopyPage() {
       </div>
 
       <section className="panel">
-        <h2>Folder map (JSON)</h2>
+        <h2>Folder map</h2>
         <p className="hint">
-          Array of <code>{"{ \"source\": \"path\", \"destination\": \"path\" }"}</code>. Destination
-          folders must already exist on the new server.
+          Map each <strong>source</strong> folder (old server) to a <strong>destination</strong> path
+          on the new server — edit the destination column to rename. Folders must exist on the
+          destination unless your host creates them on upload.
         </p>
-        <textarea
-          className="folders-json"
-          rows={8}
-          value={foldersJson}
-          onChange={(e) => setFoldersJson(e.target.value)}
-          spellCheck={false}
-        />
+        <div className="folder-map-mode-toggle">
+          <label className="check-inline">
+            <input
+              type="radio"
+              name="copyMapMode"
+              checked={folderMapMode === "picker"}
+              onChange={() => setFolderMapMode("picker")}
+            />
+            Pick from source
+          </label>
+          <label className="check-inline">
+            <input
+              type="radio"
+              name="copyMapMode"
+              checked={folderMapMode === "json"}
+              onChange={() => setFolderMapMode("json")}
+            />
+            JSON (advanced)
+          </label>
+        </div>
+
+        {folderMapMode === "picker" ? (
+          <>
+            <div className="row-actions wrap" style={{ marginBottom: "0.75rem" }}>
+              <button type="button" disabled={mbLoadBusy} onClick={() => void loadSourceMailboxes()}>
+                Load folders from source
+              </button>
+              <button
+                type="button"
+                disabled={folderRows.length === 0}
+                onClick={() => setFolderRows((rows) => rows.map((r) => ({ ...r, include: true })))}
+              >
+                Select all
+              </button>
+              <button
+                type="button"
+                disabled={folderRows.length === 0}
+                onClick={() => setFolderRows((rows) => rows.map((r) => ({ ...r, include: false })))}
+              >
+                Clear all
+              </button>
+              <button
+                type="button"
+                disabled={folderRows.length === 0}
+                onClick={() =>
+                  setFolderRows((rows) =>
+                    rows.map((r) =>
+                      r.source.toUpperCase() === "INBOX" ? { ...r, include: true } : { ...r, include: false }
+                    )
+                  )
+                }
+              >
+                INBOX only
+              </button>
+            </div>
+            {mbLoadErr && <p className="err-box">{mbLoadErr}</p>}
+            {folderRows.length > 0 ? (
+              <div className="copy-map-table-wrap">
+                <table className="copy-map-table">
+                  <thead>
+                    <tr>
+                      <th>Copy</th>
+                      <th>Source path</th>
+                      <th>Destination path</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {folderRows.map((row, i) => (
+                      <tr key={`${row.source}-${i}`}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={row.include}
+                            onChange={(e) => {
+                              const v = e.target.checked;
+                              setFolderRows((rows) =>
+                                rows.map((r, j) => (j === i ? { ...r, include: v } : r))
+                              );
+                            }}
+                          />
+                        </td>
+                        <td className="mono">{row.source}</td>
+                        <td>
+                          <input
+                            className="copy-dest-input"
+                            type="text"
+                            value={row.dest}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setFolderRows((rows) =>
+                                rows.map((r, j) => (j === i ? { ...r, dest: v } : r))
+                              );
+                            }}
+                            aria-label={`Destination path for ${row.source}`}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="hint">Load folders from the source account, then tick the ones to copy.</p>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="hint">
+              Array of <code>{"{ \"source\": \"path\", \"destination\": \"path\" }"}</code>.
+            </p>
+            <textarea
+              className="folders-json"
+              rows={8}
+              value={foldersJson}
+              onChange={(e) => setFoldersJson(e.target.value)}
+              spellCheck={false}
+            />
+          </>
+        )}
         <div className="row" style={{ marginTop: "0.75rem" }}>
           <label>
             Concurrency
@@ -390,30 +558,42 @@ export default function CopyPage() {
           {s && s.failed > 0 && (
             <div className="copy-failures">
               <h3>Why messages failed</h3>
-              {poll?.failures && poll.failures.reasons.length > 0 ? (
+              {poll?.failureQueryError ? (
+                <p className="err-box">
+                  Could not read failure details from the job database: {poll.failureQueryError}
+                </p>
+              ) : null}
+              {poll?.failures?.failedJobIds && poll.failures.failedJobIds.length > 1 ? (
+                <p className="hint mono wrap-break">
+                  Debug: failed rows reference job_ids: {poll.failures.failedJobIds.join(", ")}
+                </p>
+              ) : null}
+              {poll?.failures &&
+              (poll.failures.reasons.length > 0 || poll.failures.samples.length > 0) ? (
                 <>
                   <p className="hint">
-                    Errors are stored per message on the server. Fix the cause (wrong folder, quota,
-                    TLS, etc.), then run a new job or adjust the store via CLI if you are retrying the
-                    same job.
+                    Errors are stored per message. Fix the cause (missing destination folder, quota,
+                    APPEND limits, etc.), then start a new job or retry after fixing the server.
                   </p>
-                  <table className="copy-fail-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Count</th>
-                        <th scope="col">Reason</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {poll.failures.reasons.map((r, i) => (
-                        <tr key={i}>
-                          <td>{r.count}</td>
-                          <td className="mono wrap-break fail-reason-cell">{r.reason}</td>
+                  {poll.failures.reasons.length > 0 ? (
+                    <table className="copy-fail-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Count</th>
+                          <th scope="col">Reason</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {poll.failures.samples.length > 0 && (
+                      </thead>
+                      <tbody>
+                        {poll.failures.reasons.map((r, i) => (
+                          <tr key={i}>
+                            <td>{r.count}</td>
+                            <td className="mono wrap-break fail-reason-cell">{r.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : null}
+                  {poll.failures.samples.length > 0 ? (
                     <>
                       <h4>Sample rows</h4>
                       <table className="copy-fail-table">
@@ -435,13 +615,15 @@ export default function CopyPage() {
                         </tbody>
                       </table>
                     </>
-                  )}
+                  ) : null}
                 </>
-              ) : (
+              ) : !poll?.failureQueryError ? (
                 <p className="hint">
-                  Failure details are loading or unavailable. Click <strong>Refresh now</strong>.
+                  No failure breakdown returned yet. Click <strong>Refresh now</strong> after upgrading
+                  imap-tool. If this persists, failed rows in DB:{" "}
+                  <strong>{poll?.failures?.failedRowCount ?? "—"}</strong>.
                 </p>
-              )}
+              ) : null}
             </div>
           )}
           <div className="row-actions wrap">

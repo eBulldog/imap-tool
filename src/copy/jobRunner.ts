@@ -216,10 +216,15 @@ export interface CopyFailureSampleRow {
 export interface CopyFailureDetails {
   reasons: CopyFailureReasonRow[];
   samples: CopyFailureSampleRow[];
+  /** Rows with status failed (ignores job_id filter). */
+  failedRowCount: number;
+  /** If non-empty, shows which `job_id` values appear on failed rows (diagnostics). */
+  failedJobIds: string[];
 }
 
 /**
  * Reads grouped failure messages and sample rows for UI / CLI diagnostics.
+ * Uses the whole SQLite file (one job per file); does not require `job_id` to match `DEFAULT_JOB_ID`.
  */
 export function readCopyFailureDetails(
   storePath: string,
@@ -228,12 +233,16 @@ export function readCopyFailureDetails(
 ): CopyFailureDetails {
   const store = openCopyCheckpointStore(storePath);
   try {
-    if (!store.getJob(jobId)) {
+    const failedN = store.countFailedRowsUnscoped();
+    const hasMeta = !!store.getJob(jobId);
+    if (!hasMeta && failedN === 0) {
       throw new ConfigError("no copy job in store");
     }
     return {
-      reasons: store.failureReasonSummary(jobId, opts?.maxReasonGroups ?? 25),
-      samples: store.failureSamples(jobId, opts?.sampleLimit ?? 50),
+      reasons: store.failureReasonSummary(opts?.maxReasonGroups ?? 25),
+      samples: store.failureSamples(opts?.sampleLimit ?? 50),
+      failedRowCount: failedN,
+      failedJobIds: store.distinctFailedJobIds(),
     };
   } finally {
     store.close();

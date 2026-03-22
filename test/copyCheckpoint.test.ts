@@ -118,7 +118,7 @@ describe("CopyCheckpointStore", () => {
       const c = store.claimNext(DEFAULT_JOB_ID)!;
       store.markTerminalFailure(c.id, "no mailbox");
 
-      const summary = store.failureReasonSummary(DEFAULT_JOB_ID);
+      const summary = store.failureReasonSummary();
       expect(summary).toEqual(
         expect.arrayContaining([
           { reason: "quota", count: 2 },
@@ -132,5 +132,7 @@ describe("CopyCheckpointStore", () => {
     const details = readCopyFailureDetails(path);
     expect(details.reasons.length).toBe(2);
     expect(details.samples.length).toBe(3);
+    expect(details.failedRowCount).toBe(3);
+    expect(details.failedJobIds).toContain("default");
   });
 });
