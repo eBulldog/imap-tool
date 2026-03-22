@@ -3,7 +3,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openCopyCheckpointStore } from "../src/copy/checkpointStore.js";
-import { readCopyFailureDetails } from "../src/copy/jobRunner.js";
+import { readCopyFailureDetails, readCopyFailureDiagnostics } from "../src/copy/jobRunner.js";
 import { DEFAULT_JOB_ID, type CopySpecFileV1 } from "../src/copy/jobTypes.js";
 
 let dir: string;
@@ -134,5 +134,17 @@ describe("CopyCheckpointStore", () => {
     expect(details.samples.length).toBe(3);
     expect(details.failedRowCount).toBe(3);
     expect(details.failedJobIds).toContain("default");
+
+    const diag = readCopyFailureDiagnostics(path);
+    expect(diag.failedRowCount).toBe(3);
+    expect(diag.readException).toBeUndefined();
+
+    const store2 = openCopyCheckpointStore(path);
+    try {
+      const br = store2.copyItemStatusBreakdown();
+      expect(br.some((x) => x.status === "failed" && x.count === 3)).toBe(true);
+    } finally {
+      store2.close();
+    }
   });
 });

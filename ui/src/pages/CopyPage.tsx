@@ -23,7 +23,10 @@ type FailureDetails = {
   samples: { sourceMailbox: string; sourceUid: number; failReason: string }[];
   failedRowCount?: number;
   failedJobIds?: string[];
+  readException?: string;
 };
+
+type StatusBreakdownRow = { status: string; count: number };
 
 type JobPoll = {
   jobId: string;
@@ -37,6 +40,7 @@ type JobPoll = {
   jobsDir?: string;
   dataDir?: string;
   lastRunFinishedAt?: string;
+  itemStatusBreakdown?: StatusBreakdownRow[] | null;
   failures: FailureDetails | null;
   failureQueryError?: string;
 };
@@ -555,12 +559,37 @@ export default function CopyPage() {
               <li>Total: {s.total}</li>
             </ul>
           )}
+          {poll?.itemStatusBreakdown && poll.itemStatusBreakdown.length > 0 && (
+            <div className="copy-status-breakdown">
+              <h3>Database rows (by status)</h3>
+              <p className="hint">
+                Raw counts from <code>copy_item</code> — should match the summary above. If not, say
+                which numbers differ when reporting a bug.
+              </p>
+              <table className="copy-fail-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Status</th>
+                    <th scope="col">Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {poll.itemStatusBreakdown.map((r, i) => (
+                    <tr key={`${r.status}-${i}`}>
+                      <td className="mono">{r.status}</td>
+                      <td>{r.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           {s && s.failed > 0 && (
             <div className="copy-failures">
               <h3>Why messages failed</h3>
-              {poll?.failureQueryError ? (
+              {poll?.failureQueryError || poll?.failures?.readException ? (
                 <p className="err-box">
-                  Could not read failure details from the job database: {poll.failureQueryError}
+                  Failure read issue: {poll.failureQueryError ?? poll.failures?.readException}
                 </p>
               ) : null}
               {poll?.failures?.failedJobIds && poll.failures.failedJobIds.length > 1 ? (
@@ -617,13 +646,26 @@ export default function CopyPage() {
                     </>
                   ) : null}
                 </>
-              ) : !poll?.failureQueryError ? (
+              ) : (
                 <p className="hint">
-                  No failure breakdown returned yet. Click <strong>Refresh now</strong> after upgrading
-                  imap-tool. If this persists, failed rows in DB:{" "}
-                  <strong>{poll?.failures?.failedRowCount ?? "—"}</strong>.
+                  {poll?.failures != null && (poll.failures.failedRowCount ?? 0) > 0 ? (
+                    <>
+                      The database reports <strong>{poll.failures.failedRowCount}</strong> failed rows
+                      but no <code>fail_reason</code> text could be grouped (try{" "}
+                      <strong>Refresh now</strong>). If every reason is &quot;(no reason recorded)&quot;,
+                      this build did not capture IMAP errors for those rows — run a new job after
+                      upgrading the tool.
+                    </>
+                  ) : (
+                    <>
+                      No failure payload from API (failed rows in DB:{" "}
+                      <strong>{poll?.failures?.failedRowCount ?? "—"}</strong>). Restart{" "}
+                      <code>imap-tool ui</code> after <code>npm run build:all</code> and hard-refresh the
+                      browser.
+                    </>
+                  )}
                 </p>
-              ) : null}
+              )}
             </div>
           )}
           <div className="row-actions wrap">

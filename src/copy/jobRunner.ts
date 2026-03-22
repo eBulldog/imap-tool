@@ -220,7 +220,11 @@ export interface CopyFailureDetails {
   failedRowCount: number;
   /** If non-empty, shows which `job_id` values appear on failed rows (diagnostics). */
   failedJobIds: string[];
+  /** Set when a SQLite read threw (should be rare). */
+  readException?: string;
 }
+
+export type CopyItemStatusRow = { status: string; count: number };
 
 /**
  * Reads grouped failure messages and sample rows for UI / CLI diagnostics.
@@ -244,6 +248,58 @@ export function readCopyFailureDetails(
       failedRowCount: failedN,
       failedJobIds: store.distinctFailedJobIds(),
     };
+  } finally {
+    store.close();
+  }
+}
+
+/**
+ * Same data as {@link readCopyFailureDetails} but **never throws** — safe for HTTP handlers.
+ */
+export function readCopyFailureDiagnostics(
+  storePath: string,
+  opts?: { maxReasonGroups?: number; sampleLimit?: number }
+): CopyFailureDetails {
+  try {
+    const store = openCopyCheckpointStore(storePath);
+    try {
+      return {
+        failedRowCount: store.countFailedRowsUnscoped(),
+        reasons: store.failureReasonSummary(opts?.maxReasonGroups ?? 40),
+        samples: store.failureSamples(opts?.sampleLimit ?? 50),
+        failedJobIds: store.distinctFailedJobIds(),
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return {
+        failedRowCount: 0,
+        reasons: [],
+        samples: [],
+        failedJobIds: [],
+        readException: msg,
+      };
+    } finally {
+      store.close();
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return {
+      failedRowCount: 0,
+      reasons: [],
+      samples: [],
+      failedJobIds: [],
+      readException: msg,
+    };
+  }
+}
+
+/**
+ * Histogram of `copy_item.status` values (diagnostics).
+ */
+export function readCopyItemStatusBreakdown(storePath: string): CopyItemStatusRow[] {
+  const store = openCopyCheckpointStore(storePath);
+  try {
+    return store.copyItemStatusBreakdown();
   } finally {
     store.close();
   }

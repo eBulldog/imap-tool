@@ -646,6 +646,17 @@ button.linkish {
   border-top: 1px solid var(--border);
 }
 
+.copy-status-breakdown {
+  margin: 1rem 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.copy-status-breakdown h3 {
+  font-size: 0.95rem;
+  margin: 0 0 0.35rem;
+}
+
 .copy-failures h3 {
   font-size: 0.95rem;
   margin: 0 0 0.35rem;

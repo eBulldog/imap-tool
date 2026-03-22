@@ -386,6 +386,19 @@ export class CopyCheckpointStore {
       .all() as { job_id: string }[];
     return rows.map((r) => r.job_id);
   }
+
+  /** Raw status histogram for `copy_item` (truth vs aggregated stats). */
+  copyItemStatusBreakdown(): { status: string; count: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT status, COUNT(*) AS c FROM copy_item GROUP BY status ORDER BY c DESC`
+      )
+      .all() as { status: string | null; c: number }[];
+    return rows.map((r) => ({
+      status: r.status != null && r.status !== "" ? r.status : "(null)",
+      count: r.c,
+    }));
+  }
 }
 
 /**

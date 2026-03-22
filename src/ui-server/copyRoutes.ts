@@ -6,7 +6,8 @@ import type { FastifyInstance } from "fastify";
 import { ConfigError } from "../imap/config.js";
 import { parseCopySpecJson } from "../copy/spec.js";
 import {
-  readCopyFailureDetails,
+  readCopyFailureDiagnostics,
+  readCopyItemStatusBreakdown,
   readCopyStatus,
   runCopyJob,
   setCopyPaused,
@@ -216,14 +217,25 @@ export function registerCopyRoutes(app: FastifyInstance): void {
       /* */
     }
 
-    let failures: ReturnType<typeof readCopyFailureDetails> | null = null;
+    let itemStatusBreakdown: ReturnType<typeof readCopyItemStatusBreakdown> | null = null;
+    try {
+      itemStatusBreakdown = readCopyItemStatusBreakdown(storePath);
+    } catch {
+      itemStatusBreakdown = null;
+    }
+
+    const failedFromBreakdown =
+      itemStatusBreakdown?.find((r) => r.status === "failed")?.count ?? 0;
+    const failedFromStats = snapshot?.stats?.failed ?? 0;
+    const wantFailureDetails = failedFromStats > 0 || failedFromBreakdown > 0;
+
+    let failures: ReturnType<typeof readCopyFailureDiagnostics> | null = null;
     let failureQueryError: string | undefined;
-    if (snapshot?.stats && snapshot.stats.failed > 0) {
-      try {
-        failures = readCopyFailureDetails(storePath);
-      } catch (e) {
-        failures = null;
-        failureQueryError = e instanceof Error ? e.message : String(e);
+    if (wantFailureDetails) {
+      const diag = readCopyFailureDiagnostics(storePath);
+      failures = diag;
+      if (diag.readException) {
+        failureQueryError = diag.readException;
       }
     }
 
@@ -240,6 +252,7 @@ export function registerCopyRoutes(app: FastifyInstance): void {
       paused: snapshot?.paused ?? false,
       createdAt: snapshot?.createdAt ?? "",
       stats: snapshot?.stats ?? null,
+      itemStatusBreakdown,
       failures,
       failureQueryError,
     };

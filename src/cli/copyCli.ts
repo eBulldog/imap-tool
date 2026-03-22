@@ -1,12 +1,11 @@
 import { stringifyReport } from "../report/jsonSerialize.js";
 import { ConfigError } from "../imap/config.js";
 import {
-  readCopyFailureDetails,
+  readCopyFailureDiagnostics,
   readCopyStatus,
   runCopyJob,
   setCopyPaused,
 } from "../copy/jobRunner.js";
-import { DEFAULT_JOB_ID } from "../copy/jobTypes.js";
 
 function getStore(opts: Map<string, string>): string {
   const s = opts.get("--store")?.trim();
@@ -61,9 +60,9 @@ export async function cmdCopy(
     }
     case "status": {
       const { stats, paused, createdAt } = readCopyStatus(store);
-      let failures: ReturnType<typeof readCopyFailureDetails> | undefined;
+      let failures: ReturnType<typeof readCopyFailureDiagnostics> | undefined;
       if (stats.failed > 0) {
-        failures = readCopyFailureDetails(store, DEFAULT_JOB_ID, {
+        failures = readCopyFailureDiagnostics(store, {
           maxReasonGroups: 40,
           sampleLimit: flags.has("--verbose") ? 40 : 0,
         });

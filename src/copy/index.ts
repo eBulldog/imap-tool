@@ -19,10 +19,13 @@ export {
   runCopyJob,
   readCopyStatus,
   readCopyFailureDetails,
+  readCopyFailureDiagnostics,
+  readCopyItemStatusBreakdown,
   setCopyPaused,
   type RunCopyJobOptions,
   type CopyStatusSnapshot,
   type CopyFailureDetails,
   type CopyFailureReasonRow,
   type CopyFailureSampleRow,
+  type CopyItemStatusRow,
 } from "./jobRunner.js";

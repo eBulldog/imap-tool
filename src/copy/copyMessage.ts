@@ -10,6 +10,15 @@ export class CopyVerifyError extends Error {
   }
 }
 
+function errorText(e: unknown): string {
+  if (e instanceof Error && e.message.trim() !== "") {
+    return e.message.trim();
+  }
+  const s = String(e);
+  if (s.trim() !== "") return s.trim();
+  return "(error had no message — check server/IMAP logs)";
+}
+
 export interface ProcessCopyItemOptions {
   store: CopyCheckpointStore;
   maxRetries: number;
@@ -143,7 +152,7 @@ export async function processCopyItem(
       await verifyDest(dest, row.destMailbox, row.destUid!, row.sourceSha256!);
       store.markDone(row.id);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorText(e);
       if (e instanceof CopyVerifyError) {
         store.markTerminalFailure(row.id, `verify: ${msg}`);
       } else {
@@ -219,7 +228,7 @@ export async function processCopyItem(
     await verifyDest(dest, row.destMailbox, destUid, fetched.sourceSha256);
     store.markDone(row.id);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorText(e);
     if (e instanceof CopyVerifyError) {
       store.markTerminalFailure(row.id, msg);
       return;
