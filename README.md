@@ -1,79 +1,137 @@
 # imap-tool
 
-TypeScript CLI and library for **IMAP metadata** (counts, sizes, UIDs, envelopes), **migration-style comparison**, and optional **verified provider-to-provider copy** (FETCH → SHA-256 → APPEND → re-FETCH → hash match, with SQLite checkpoints). It does not render email; it produces JSON reports you can diff.
+**imap-tool** helps you **inspect**, **compare**, and **move** mail over IMAP when you care about **correctness and repeatability**. It is aimed at operators and developers doing mailbox migrations, audits, or troubleshooting—not at reading mail like a desktop client.
 
-See `PLAN.md` for architecture and goals.
+You get a **command-line tool**, an optional **local web dashboard**, and a **small TypeScript library** you can import in your own scripts.
+
+---
+
+## What it does
+
+### Explore an account
+
+- **Check connectivity** — TLS, login, and server capabilities (`ping`).
+- **List folders** — mailbox tree plus IMAP `STATUS` (message counts, unseen, UID state) (`mailboxes`).
+- **Scan messages** — per-folder metadata in batches: UIDs, flags, sizes, internal dates, envelope fields (`scan`, `scan-all`). Output is **JSON** you can archive or diff.
+- **Pull one message** — raw RFC822 to a file or stdout, using peek-style fetch where the server allows it (`fetch`).
+- **Find by Message-ID** — server-side search in one folder or across all folders (`find`).
+
+### Compare two accounts (metadata)
+
+- Run **`scan-all`** (or large **`scan`** runs) on the **old** and **new** servers, save two JSON reports, then **`compare`** them with an optional folder rename map.
+- The compare view explains **which mailboxes and fingerprints** differ—useful to see if a migration “looks complete” before you trust it blindly.
+
+### Copy mail between two servers (verified)
+
+- **Verified copy** means: read the full message on the source, **APPEND** to the destination, read it back on the destination, and **SHA-256** the bytes so you know the copy matches.
+- Progress is stored in **SQLite** so you can **stop, resume, and retry**; you can **pause** and **resume** while a run is active.
+- **Destination folders** are **created automatically** when the server allows it (IMAP `CREATE` for each missing level). If the server forbids that, fix ACLs or create folders yourself.
+- **Duplicates** are handled when possible: if the destination already has the same **Message-ID** and **RFC822.SIZE**, the tool can verify and skip a second append.
+- Failures record **readable IMAP errors** (not just a generic “command failed”), grouped in status output and in the UI.
+
+### Web UI (optional)
+
+After **`npm run build:all`**, **`imap-tool ui`** serves a small React app plus a JSON API:
+
+| Area | What you get |
+|------|----------------|
+| **Home / compare** | Connect to **two servers** (A and B), compare **folder lists** and **message fingerprints** for a chosen pair of mailboxes. |
+| **Capabilities** | Browse what common IMAP extensions mean. |
+| **Message viewer** | Pick a mailbox, browse rows, open a **raw RFC822** preview. |
+| **Copy** | Same verified copy model as the CLI: map folders, start a job, watch progress, **pause / resume / stop**, and inspect **failure summaries** backed by SQLite. |
+
+Credentials for interactive flows are sent in **POST bodies** to your local server. Treat the bind address like any admin tool: use **`IMAP_UI_HOST=127.0.0.1`** on shared machines, or put **HTTPS + auth** in front if you expose it beyond a trusted LAN.
+
+---
+
+## What it is not
+
+- **Not an email client** — no threads, rendering, or compose.
+- **Not a full sync engine** — copy is **one-directional** and job-oriented (source → destination with a clear folder map).
+- **No built-in login on the HTTP API** — see **Security** below.
+
+---
 
 ## Requirements
 
-- Node.js **20+**
+- **Node.js 20+**
 
-## Install
+## Install and sanity check
 
 ```bash
 npm install
 npm run build
 ```
 
-**`.env.example`** lists the usual **`IMAP_*`** variables. The CLI reads **the process environment only** (it does not auto-load a `.env` file); export vars in your shell, use `set -a && source ./.env && set +a`, or your own secret manager.
+Run the CLI (from this directory after build):
 
-**Checks:** `npm test` (Vitest), or **`npm run check`** (`build` + `test`).
+```bash
+# If npx complains about Permission denied, use: chmod +x bin/imap-tool.js
+# or: node bin/imap-tool.js …
+IMAP_HOST=… IMAP_USER=… IMAP_PASS=… npx imap-tool ping
+```
 
-Run via `npx imap-tool` from this directory after build, or `npm link` for a global command. The file `bin/imap-tool.js` must be **executable** (`chmod +x bin/imap-tool.js`); otherwise `npx imap-tool` can report `Permission denied`. You can always run **`node bin/imap-tool.js …`** instead.
+**Developer check:** `npm test` or **`npm run check`** (build + tests).
 
-### Web UI (dual-server dashboard)
+**Environment file:** **`.env.example`** documents `IMAP_*`. The CLI does **not** auto-load `.env`; export variables in your shell (e.g. `set -a && source ./.env && set +a`) or use your own secret manager.
 
-React + Fastify. **Default bind `0.0.0.0`** (all IPv4); stderr lists LAN URLs. **Main page:** two independent connection forms (Server A / B), expandable **IMAP capabilities** with descriptions, **folder comparison** (LIST+STATUS), and **message comparison** (highest-UID slice + fingerprint multiset diff). **Copy** route (`/copy`): start a **verified two-host copy** (same proof model as CLI `copy`), poll progress, pause/resume queue, stop workers, re-run after interrupt. **Message viewer** route: full-width aligned rows, sort by internal date, **Raw** RFC822 preview. **Capabilities** route: static glossary (`GET /api/capabilities/reference`).
+---
 
-Interactive flows use **`POST /api/session/*`**, **`POST /api/compare/*`**, and **`/api/copy/jobs*`** with JSON bodies (host, user, pass, TLS flags). Passwords are sent to your imap-tool process over **HTTP** unless you terminate TLS in front — use a trusted LAN or put nginx/Caddy in front for HTTPS.
-
-Copy jobs persist under **`IMAP_COPY_JOB_DIR`** (default: a subdirectory of the system temp dir, e.g. `/tmp/imap-tool-copy-jobs` on Linux). Each job is a UUID folder with `spec.json` and `job.sqlite`. **`GET /api/copy/jobs/:id`** includes **`failures`** (grouped reasons + sample rows) when `stats.failed > 0`. Use **Test connection** on `/copy` before starting a job; CLI: `copy status --store … --verbose` prints failure groups and samples.
+## Web UI quick start
 
 ```bash
 npm run build:all
 node bin/imap-tool.js ui
 ```
 
-Optional **CLI-style env** still powers `GET /api/ping`, `GET /api/mailboxes`, `GET /api/scan` when `IMAP_HOST` / `IMAP_USER` / `IMAP_PASS` are set.
+Then open the URL printed on stderr (by default the server listens on **all IPv4 interfaces**—see **Security**).
 
-- **`IMAP_UI_PORT`** — port (default `3847`).
-- **`IMAP_UI_HOST=127.0.0.1`** — loopback-only bind.
-- **`IMAP_COPY_JOB_DIR`** — directory for UI/HTTP copy job files (`spec.json`, `job.sqlite` per job UUID).
+Useful environment variables:
 
-LAN exposure includes **`/api/*`**; firewall or `IMAP_UI_HOST` if needed.
+| Variable | Purpose |
+|----------|---------|
+| `IMAP_UI_PORT` | HTTP port (default **3847**). |
+| `IMAP_UI_HOST` | Bind address; use **`127.0.0.1`** to stay on loopback. |
+| `IMAP_COPY_JOB_DIR` | Where copy jobs store **`spec.json`** + **`job.sqlite`** (default: under the system temp directory). |
 
-### Security notes (operators)
+Optional: set **`IMAP_HOST`**, **`IMAP_USER`**, **`IMAP_PASS`** so legacy **`GET /api/ping`**, **`GET /api/mailboxes`**, and **`GET /api/scan`** work without posting credentials.
 
-- **No authentication** on the HTTP API or static UI. Anyone who can reach the bind address can invoke IMAP using credentials supplied in POST bodies, read copy job status, and enumerate job IDs under `IMAP_COPY_JOB_DIR`. Use **`IMAP_UI_HOST=127.0.0.1`**, a firewall, or a reverse proxy with TLS and auth when not on a trusted LAN.
-- **Secrets on disk:** each copy job writes **`spec.json`** (includes mailbox passwords) next to **`job.sqlite`**. New job directories are created with mode **0700** on POSIX where supported; set a private **`IMAP_COPY_JOB_DIR`** on shared hosts.
-- **Copy job IDs** in `/api/copy/jobs/:id` must be UUIDs (prevents path traversal via `..` in the URL segment).
-- **TLS:** IMAP defaults to **verify server certificates** (`tlsRejectUnauthorized` / `IMAP_TLS_REJECT_UNAUTHORIZED`); disable only for deliberate lab use.
+**UI development:** terminal 1 — `imap-tool ui`; terminal 2 — `cd ui && npm run dev` (Vite proxies `/api` to the Fastify port).
 
-**Dev:** terminal 1 `imap-tool ui`; terminal 2 `cd ui && npm run dev` (Vite proxies `/api` → `127.0.0.1:3847`).
+---
 
-**CLI:** `scan` / `scan-all` **`--limit N`** = same “highest N UIDs” semantics as the UI message compare.
+## Security (operators)
 
-## Configuration
+- **No authentication** on the HTTP API or static files. Anyone who can reach the bind address can use posted credentials against IMAP, see copy job status, and list job IDs under `IMAP_COPY_JOB_DIR`. Prefer **`IMAP_UI_HOST=127.0.0.1`**, a firewall, or a reverse proxy with TLS and your own auth.
+- **Secrets on disk:** each copy job writes **`spec.json`** (includes passwords) next to **`job.sqlite`**. New job directories use mode **0700** on POSIX where supported; point **`IMAP_COPY_JOB_DIR`** at a private directory on shared hosts.
+- **Copy job IDs** in URLs must be **UUIDs** (guards against odd path segments).
+- **TLS verification** for IMAP defaults to **on**; turn it off only for deliberate lab work (`tlsRejectUnauthorized` in JSON / `IMAP_TLS_REJECT_UNAUTHORIZED` for CLI env).
 
-Connection settings are read from the environment (and optional `--password-env` for a custom secret variable name).
+---
+
+## CLI environment (shared commands)
+
+Used by `ping`, `mailboxes`, `scan`, `scan-all`, `fetch`, `find`, and optional `GET` routes in the UI. Override the password variable name with **`--password-env`**.
 
 | Variable | Meaning |
 |----------|---------|
 | `IMAP_HOST` | Server hostname |
-| `IMAP_PORT` | Port (default `993` if secure, else `143`) |
+| `IMAP_PORT` | Port (default **993** if secure, else **143**) |
 | `IMAP_SECURE` | `true` / `false` / `1` / `0` |
 | `IMAP_USER` | Login user |
-| `IMAP_PASS` | Password (avoid shell history; prefer env file) |
-| `IMAP_TLS_REJECT_UNAUTHORIZED` | Default `1`; set `0` only for testing with bad certs |
+| `IMAP_PASS` | Password (avoid shell history where possible) |
+| `IMAP_TLS_REJECT_UNAUTHORIZED` | Default **on**; set `0` only for broken lab certs |
 
-## Commands
+---
+
+## CLI commands
 
 ### `ping`
 
 Verify TLS, login, and capabilities.
 
 ```bash
-IMAP_HOST=... IMAP_USER=... IMAP_PASS=... npx imap-tool ping
+IMAP_HOST=… IMAP_USER=… IMAP_PASS=… npx imap-tool ping
 ```
 
 ### `mailboxes`
@@ -86,7 +144,7 @@ npx imap-tool mailboxes
 
 ### `scan <mailbox>`
 
-`EXAMINE` + batched `UID FETCH` (flags, size, internal date, envelope). Progress on stderr.
+Read-only open + batched `UID FETCH` (flags, size, internal date, envelope). Progress on stderr.
 
 ```bash
 npx imap-tool scan INBOX --batch 200
@@ -94,9 +152,11 @@ npx imap-tool scan INBOX --jsonl
 npx imap-tool scan INBOX --content-sha256
 ```
 
+`--limit N` matches the UI: **highest N UIDs** in that folder.
+
 ### `scan-all`
 
-Same as `scan` for every listed mailbox (can be slow and large).
+Same as `scan` for every listed mailbox (can be slow and produce large JSON).
 
 ```bash
 npx imap-tool scan-all --batch 200 -o baseline.json
@@ -104,7 +164,7 @@ npx imap-tool scan-all --batch 200 -o baseline.json
 
 ### `fetch <mailbox> <uid>`
 
-Raw RFC822 to stdout or `--output file.eml`. Uses peek-style fetch where supported.
+Raw RFC822 to stdout or `-o` file.
 
 ```bash
 npx imap-tool fetch INBOX 42 -o msg.eml
@@ -112,7 +172,7 @@ npx imap-tool fetch INBOX 42 -o msg.eml
 
 ### `find <message-id fragment>`
 
-Server-side `SEARCH` for `Message-ID` (substring). With `--all-mailboxes`, opens each folder (slow).
+Server-side `SEARCH` on Message-ID (substring). `--all-mailboxes` opens each folder (slow).
 
 ```bash
 npx imap-tool find "<abc@host>" --mailbox INBOX
@@ -121,7 +181,7 @@ npx imap-tool find "abc@host" --all-mailboxes
 
 ### `compare <source.json> <dest.json>`
 
-Compare two account-scan reports. Optional folder map:
+Compare two account-scan reports. Optional folder map, e.g.:
 
 ```json
 { "INBOX": "INBOX", "Old/Arch": "Archive" }
@@ -133,13 +193,11 @@ npx imap-tool compare source.json dest.json --map folders.json
 
 ### `index-message-ids <report.json>`
 
-Build a `messageIdNormalized → mailbox paths[]` index from an existing `scan-all` report (UC-1 helper).
+Build `messageIdNormalized → mailbox paths[]` from a `scan-all` report.
 
-### `copy` — verified two-host migration (CLI)
+### `copy` — verified migration
 
-Copies messages **from one IMAP account to another** with per-message **SHA-256** proof: full raw message on the source, **APPEND** on the destination, then full raw **FETCH** on the destination and a hash match. State lives in a **SQLite** file (`--store`) so you can stop and resume; use **`copy pause` / `copy resume`** from another terminal while **`copy run`** is active (the runner polls a flag in the DB).
-
-**Spec JSON** holds **both** connections and the folder map (passwords are in this file — use strict permissions, e.g. `chmod 600 migrate.json`).
+Copies from **source** to **destination** IMAP with per-message SHA-256 verification; state in **`--store`** SQLite.
 
 ```bash
 npx imap-tool copy run --spec migrate.json --store job.sqlite --concurrency 2
@@ -148,7 +206,7 @@ npx imap-tool copy pause --store job.sqlite
 npx imap-tool copy resume --store job.sqlite
 ```
 
-Example `migrate.json`:
+Example **`migrate.json`** (treat like a secret—`chmod 600`):
 
 ```json
 {
@@ -161,48 +219,68 @@ Example `migrate.json`:
 }
 ```
 
-- **First run** needs `--spec`; later runs on the same `--store` reuse the embedded spec (omit `--spec` or pass the same file).
-- **Destination mailboxes** are created automatically when needed (**IMAP CREATE** for each missing hierarchy level, using the server’s LIST delimiter). If creation is denied by ACL or policy, fix permissions or create folders manually.
-- **Interrupt:** `SIGINT` finishes in-flight messages then exits; run `copy run` again to continue from the store.
-- **Duplicates:** if the destination already has the same **Message-ID** and **RFC822.SIZE**, the row is verified and marked done without a second append when possible.
+Notes:
 
-Library entrypoints: `runCopyJob`, `readCopyStatus`, `openCopyCheckpointStore`, etc. — see `src/copy/` and `src/index.ts`.
+- First run needs **`--spec`**; later runs on the same **`--store`** reuse the job metadata (you can omit **`--spec`** or pass the same file).
+- **Ctrl+C** finishes in-flight work then exits; run **`copy run`** again to continue.
+- Library entrypoints: **`runCopyJob`**, **`readCopyStatus`**, **`openCopyCheckpointStore`**, etc.—see **`src/index.ts`** and **`src/copy/`**.
 
-## Migration runbook (summary)
+### `ui`
 
-**Metadata-only verification**
+Start the web dashboard (see **Web UI quick start**).
 
-1. **Baseline:** `imap-tool scan-all -o source.json` on the old server.
-2. Migrate with your tool of choice.
-3. **Destination:** `imap-tool scan-all -o dest.json` on the new server.
-4. **Compare:** `imap-tool compare source.json dest.json --map map.json`.
+---
 
-**Verified copy inside this tool**
+## Typical workflows
 
-1. **CLI:** prepare `migrate.json` (source, destination, `folders` map), then `imap-tool copy run --spec migrate.json --store job.sqlite` (repeat until all rows are `done` or review `failed` via `copy status`).
-2. **UI:** `npm run build:all`, `imap-tool ui`, open **`/copy`** — Server A = source, Server B = destination. Use **Load folders from source**, tick folders, edit **destination path** to rename on the new server (or switch to **JSON** for a raw map). **Start copy job**. Failed jobs show grouped IMAP/error text from SQLite; use **List jobs** after restart, then **Start / resume run**.
-3. Optionally still run **`scan-all` + `compare`** on both sides for a mailbox-level diff.
+**1. Metadata-only “did everything move?”**
 
-Fingerprints use `messageId` + `rfc822Size` + `internalDate` (see `fingerprintWeak` in JSON). Duplicate `Message-ID` headers are possible; use `--content-sha256` on scans when you need byte-level identity from reports alone (expensive). The **`copy`** command always hashes full RFC822 for each migrated message.
+1. `scan-all -o source.json` on the old server.
+2. Migrate with whatever tool you use.
+3. `scan-all -o dest.json` on the new server.
+4. `compare source.json dest.json --map map.json`.
 
-## Copy feature status (vs. `PLAN.md` §10)
+**2. Verified copy inside imap-tool**
 
-| Phase | Status |
+1. **CLI:** edit **`migrate.json`**, then **`copy run`** until stats show **done** or you inspect **failed** via **`copy status`**.
+2. **UI:** open **`/copy`**, map folders, start the job, use pause/resume/stop as needed; failures show grouped reasons from SQLite.
+
+**3. Optional sanity pass**
+
+Still run **`scan-all` + `compare`** after a copy if you want a second, mailbox-level view.
+
+Fingerprints in compare use **Message-ID**, **RFC822.SIZE**, and **internal date** (see `fingerprintWeak` in the JSON). For byte-level identity from scans alone you can use **`--content-sha256`** on **`scan`** (expensive). The **`copy`** path always hashes **full RFC822** per message.
+
+---
+
+## Copy feature status (see `PLAN.md` §10)
+
+| Topic | Status |
 |-------|--------|
-| **F** — Library + CLI + SQLite checkpoints + bulletproof profile | **Done** (unit tests cover the store; use a real lab for end-to-end kill/resume). |
-| **G** — Streaming hash (lower peak memory per message), explicit **APPENDLIMIT** handling, tuned stress on huge folders | **Partial** — APPEND size/limit errors get a clearer message; peak memory is still ~`concurrency × largest message` (ImapFlow returns full `source` buffers). |
-| **H** — Web UI `/copy` + copy job HTTP API | **Done** — `POST /api/copy/jobs`, `GET /api/copy/jobs`, `GET /api/copy/jobs/:id`, `POST .../run`, `pause`, `resume`, `stop`. |
+| CLI + library + SQLite checkpoints + hash verify | **Done** (unit tests cover the store; exercise kill/resume against a lab server). |
+| Lower peak memory per message, heavy-folder tuning | **Partial** — clearer **APPEND** limit errors; memory is still roughly **concurrency × largest message** (full buffers from the client library). |
+| Web UI `/copy` + HTTP job API | **Done** |
+
+---
 
 ## Tests
 
-Unit tests live under **`test/`** (checkpoint store, copy spec parsing, IMAP error formatting, comparisons, report schema). There are **no live IMAP integration tests in CI**; validate against a lab mailbox when changing client behavior.
+Unit tests live in **`test/`** (checkpoint store, copy spec, IMAP error text, comparisons, report schema). There are **no live IMAP tests in CI**; use a test mailbox when you change protocol behavior.
+
+---
 
 ## Library
 
-Import from `imap-tool` after build:
+After **`npm run build`**, import from **`imap-tool`**:
 
 ```ts
 import { SCHEMA_VERSION, runCopyJob, type CopySpecFileV1 } from "imap-tool";
 ```
 
-Public exports are listed in **`src/index.ts`** (reports, scan/compare helpers, IMAP config, **`runCopyJob`** and other copy helpers from `src/copy/`).
+Full public exports: **`src/index.ts`**.
+
+---
+
+## Architecture
+
+For design goals, module layout, and history, see **`PLAN.md`**.
