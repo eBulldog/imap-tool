@@ -67,6 +67,39 @@ describe("CopyCheckpointStore", () => {
     }
   });
 
+  it("claimNext prefers appended (verify) over pending", () => {
+    dir = mkdtempSync(join(tmpdir(), "imap-copy-"));
+    const path = join(dir, "job.sqlite");
+    const spec: CopySpecFileV1 = {
+      version: 1,
+      source: { host: "a", user: "u", pass: "p" },
+      destination: { host: "b", user: "u", pass: "p" },
+      folders: [{ source: "A", destination: "B" }],
+    };
+    const store = openCopyCheckpointStore(path);
+    try {
+      store.upsertJob(DEFAULT_JOB_ID, spec);
+      store.insertPendingItems(DEFAULT_JOB_ID, [
+        { sourceMailbox: "A", destMailbox: "B", sourceUid: 1 },
+        { sourceMailbox: "A", destMailbox: "B", sourceUid: 2 },
+      ]);
+      const row1 = store.claimNext(DEFAULT_JOB_ID)!;
+      store.markAppended(row1.id, {
+        sourceSha256: "ab",
+        rfc822Size: 1,
+        messageId: null,
+        destUid: 10,
+      });
+      const row2 = store.claimNext(DEFAULT_JOB_ID)!;
+      expect(row2.sourceUid).toBe(1);
+      expect(row2.status).toBe("in_progress");
+      const row3 = store.claimNext(DEFAULT_JOB_ID)!;
+      expect(row3.sourceUid).toBe(2);
+    } finally {
+      store.close();
+    }
+  });
+
   it("markFailed retries then terminal", () => {
     dir = mkdtempSync(join(tmpdir(), "imap-copy-"));
     const path = join(dir, "job.sqlite");

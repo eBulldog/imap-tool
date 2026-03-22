@@ -378,8 +378,8 @@ export default function CopyPage() {
         <h2>Folder map</h2>
         <p className="hint">
           Map each <strong>source</strong> folder (old server) to a <strong>destination</strong> path
-          on the new server — edit the destination column to rename. Folders must exist on the
-          destination unless your host creates them on upload.
+          on the new server — edit the destination column to rename. Missing destination folders are
+          created automatically (IMAP CREATE) before messages are appended.
         </p>
         <div className="folder-map-mode-toggle">
           <label className="check-inline">
@@ -601,8 +601,8 @@ export default function CopyPage() {
               (poll.failures.reasons.length > 0 || poll.failures.samples.length > 0) ? (
                 <>
                   <p className="hint">
-                    Errors are stored per message. Fix the cause (missing destination folder, quota,
-                    APPEND limits, etc.), then start a new job or retry after fixing the server.
+                    Errors are stored per message. Fix the cause (quota, APPEND limits, ACL denying
+                    CREATE, etc.), then start a new job or retry after fixing the server.
                   </p>
                   {poll.failures.reasons.length > 0 ? (
                     <table className="copy-fail-table">

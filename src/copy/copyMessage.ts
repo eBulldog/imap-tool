@@ -1,6 +1,8 @@
 import { createHash } from "crypto";
 import type { ImapFlow } from "imapflow";
 import type { CopyCheckpointStore } from "./checkpointStore.js";
+import { ensureDestinationMailboxCached } from "./ensureDestMailbox.js";
+import { formatImapFlowError } from "./imapErrors.js";
 import type { CopyItemRow } from "./jobTypes.js";
 
 export class CopyVerifyError extends Error {
@@ -10,20 +12,13 @@ export class CopyVerifyError extends Error {
   }
 }
 
-function errorText(e: unknown): string {
-  if (e instanceof Error && e.message.trim() !== "") {
-    return e.message.trim();
-  }
-  const s = String(e);
-  if (s.trim() !== "") return s.trim();
-  return "(error had no message — check server/IMAP logs)";
-}
-
 export interface ProcessCopyItemOptions {
   store: CopyCheckpointStore;
   maxRetries: number;
   source: ImapFlow;
   dest: ImapFlow;
+  /** Per-worker cache so each destination folder is ensured once per connection. */
+  destMailboxesEnsured: Set<string>;
 }
 
 function flagsForAppend(flags: Set<string> | undefined): string[] | undefined {
@@ -152,7 +147,7 @@ export async function processCopyItem(
       await verifyDest(dest, row.destMailbox, row.destUid!, row.sourceSha256!);
       store.markDone(row.id);
     } catch (e) {
-      const msg = errorText(e);
+      const msg = formatImapFlowError(e);
       if (e instanceof CopyVerifyError) {
         store.markTerminalFailure(row.id, `verify: ${msg}`);
       } else {
@@ -166,6 +161,8 @@ export async function processCopyItem(
 
   try {
     const fetched = await fetchFromSource(source, row.sourceMailbox, row.sourceUid);
+
+    await ensureDestinationMailboxCached(dest, row.destMailbox, opts.destMailboxesEnsured);
 
     let destUid = await findDestUidByMessageId(
       dest,
@@ -228,7 +225,7 @@ export async function processCopyItem(
     await verifyDest(dest, row.destMailbox, destUid, fetched.sourceSha256);
     store.markDone(row.id);
   } catch (e) {
-    const msg = errorText(e);
+    const msg = formatImapFlowError(e);
     if (e instanceof CopyVerifyError) {
       store.markTerminalFailure(row.id, msg);
       return;

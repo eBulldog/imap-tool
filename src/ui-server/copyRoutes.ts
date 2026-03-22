@@ -14,6 +14,7 @@ import {
 } from "../copy/jobRunner.js";
 import type { CopySpecFileV1 } from "../copy/jobTypes.js";
 import { parseImapConnectionBody } from "./connBody.js";
+import { assertValidCopyJobId, isValidCopyJobId } from "./copyJobId.js";
 
 export type CopyJobPhase = "idle" | "running" | "stopped" | "completed" | "failed";
 
@@ -96,13 +97,14 @@ function buildSpecFromBody(body: Record<string, unknown>): CopySpecFileV1 {
 }
 
 function getOrCreateJobEntry(id: string): CopyJobEntry | null {
-  const existing = activeJobs.get(id);
+  const safeId = assertValidCopyJobId(id);
+  const existing = activeJobs.get(safeId);
   if (existing) return existing;
-  const storePath = path.join(jobsDir, id, "job.sqlite");
+  const storePath = path.join(jobsDir, safeId, "job.sqlite");
   if (!fs.existsSync(storePath)) return null;
-  const dir = path.join(jobsDir, id);
+  const dir = path.join(jobsDir, safeId);
   const rec: CopyJobEntry = {
-    id,
+    id: safeId,
     dir,
     storePath,
     specPath: path.join(dir, "spec.json"),
@@ -111,7 +113,7 @@ function getOrCreateJobEntry(id: string): CopyJobEntry | null {
     running: false,
     startedAt: "",
   };
-  activeJobs.set(id, rec);
+  activeJobs.set(safeId, rec);
   return rec;
 }
 
@@ -149,6 +151,11 @@ export function registerCopyRoutes(app: FastifyInstance): void {
     const id = randomUUID();
     const dir = path.join(jobsDir, id);
     fs.mkdirSync(dir, { recursive: true });
+    try {
+      fs.chmodSync(dir, 0o700);
+    } catch {
+      /* chmod unsupported or restricted (e.g. some Windows mounts) */
+    }
     const specPath = path.join(dir, "spec.json");
     const storePath = path.join(dir, "job.sqlite");
     fs.writeFileSync(specPath, JSON.stringify(spec, null, 2), "utf8");
@@ -178,7 +185,11 @@ export function registerCopyRoutes(app: FastifyInstance): void {
     const ids = fs.existsSync(jobsDir)
       ? fs
           .readdirSync(jobsDir)
-          .filter((id) => fs.existsSync(path.join(jobsDir, id, "job.sqlite")))
+          .filter(
+            (id) =>
+              isValidCopyJobId(id) &&
+              fs.existsSync(path.join(jobsDir, id, "job.sqlite"))
+          )
       : [];
 
     const jobs = ids.map((id) => {
@@ -203,7 +214,7 @@ export function registerCopyRoutes(app: FastifyInstance): void {
   });
 
   app.get<{ Params: { id: string } }>("/api/copy/jobs/:id", async (req, reply) => {
-    const id = req.params.id;
+    const id = assertValidCopyJobId(req.params.id);
     const storePath = path.join(jobsDir, id, "job.sqlite");
     if (!fs.existsSync(storePath)) {
       return reply.status(404).send({ error: "job not found" });
@@ -259,7 +270,7 @@ export function registerCopyRoutes(app: FastifyInstance): void {
   });
 
   app.post<{ Params: { id: string } }>("/api/copy/jobs/:id/run", async (req, reply) => {
-    const id = req.params.id;
+    const id = assertValidCopyJobId(req.params.id);
     const rec = getOrCreateJobEntry(id);
     if (!rec) {
       return reply.status(404).send({ error: "job not found" });
@@ -272,7 +283,7 @@ export function registerCopyRoutes(app: FastifyInstance): void {
   });
 
   app.post<{ Params: { id: string } }>("/api/copy/jobs/:id/pause", async (req, reply) => {
-    const id = req.params.id;
+    const id = assertValidCopyJobId(req.params.id);
     const storePath = path.join(jobsDir, id, "job.sqlite");
     if (!fs.existsSync(storePath)) {
       return reply.status(404).send({ error: "job not found" });
@@ -283,7 +294,7 @@ export function registerCopyRoutes(app: FastifyInstance): void {
   });
 
   app.post<{ Params: { id: string } }>("/api/copy/jobs/:id/resume", async (req, reply) => {
-    const id = req.params.id;
+    const id = assertValidCopyJobId(req.params.id);
     const storePath = path.join(jobsDir, id, "job.sqlite");
     if (!fs.existsSync(storePath)) {
       return reply.status(404).send({ error: "job not found" });
@@ -294,7 +305,7 @@ export function registerCopyRoutes(app: FastifyInstance): void {
   });
 
   app.post<{ Params: { id: string } }>("/api/copy/jobs/:id/stop", async (req, reply) => {
-    const id = req.params.id;
+    const id = assertValidCopyJobId(req.params.id);
     const rec = getOrCreateJobEntry(id);
     if (!rec) {
       return reply.status(404).send({ error: "job not found" });

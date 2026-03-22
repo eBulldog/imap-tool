@@ -79,6 +79,7 @@ async function copyWorkerLoop(
 ): Promise<void> {
   const source = createImapClient(sourceCfg);
   const dest = createImapClient(destCfg);
+  const destMailboxesEnsured = new Set<string>();
   await source.connect();
   await dest.connect();
   try {
@@ -96,7 +97,13 @@ async function copyWorkerLoop(
         continue;
       }
 
-      await processCopyItem(row, { store, maxRetries, source, dest });
+      await processCopyItem(row, {
+        store,
+        maxRetries,
+        source,
+        dest,
+        destMailboxesEnsured,
+      });
     }
   } finally {
     await dest.logout().catch(() => undefined);

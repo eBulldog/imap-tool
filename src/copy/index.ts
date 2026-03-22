@@ -14,6 +14,7 @@ export {
   CopyCheckpointStore,
 } from "./checkpointStore.js";
 export { CopyVerifyError, processCopyItem } from "./copyMessage.js";
+export { errorText, formatImapFlowError } from "./imapErrors.js";
 export {
   populateCopyItemsFromSource,
   runCopyJob,

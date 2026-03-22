@@ -15,6 +15,10 @@ npm install
 npm run build
 ```
 
+**`.env.example`** lists the usual **`IMAP_*`** variables. The CLI reads **the process environment only** (it does not auto-load a `.env` file); export vars in your shell, use `set -a && source ./.env && set +a`, or your own secret manager.
+
+**Checks:** `npm test` (Vitest), or **`npm run check`** (`build` + `test`).
+
 Run via `npx imap-tool` from this directory after build, or `npm link` for a global command. The file `bin/imap-tool.js` must be **executable** (`chmod +x bin/imap-tool.js`); otherwise `npx imap-tool` can report `Permission denied`. You can always run **`node bin/imap-tool.js …`** instead.
 
 ### Web UI (dual-server dashboard)
@@ -37,6 +41,13 @@ Optional **CLI-style env** still powers `GET /api/ping`, `GET /api/mailboxes`, `
 - **`IMAP_COPY_JOB_DIR`** — directory for UI/HTTP copy job files (`spec.json`, `job.sqlite` per job UUID).
 
 LAN exposure includes **`/api/*`**; firewall or `IMAP_UI_HOST` if needed.
+
+### Security notes (operators)
+
+- **No authentication** on the HTTP API or static UI. Anyone who can reach the bind address can invoke IMAP using credentials supplied in POST bodies, read copy job status, and enumerate job IDs under `IMAP_COPY_JOB_DIR`. Use **`IMAP_UI_HOST=127.0.0.1`**, a firewall, or a reverse proxy with TLS and auth when not on a trusted LAN.
+- **Secrets on disk:** each copy job writes **`spec.json`** (includes mailbox passwords) next to **`job.sqlite`**. New job directories are created with mode **0700** on POSIX where supported; set a private **`IMAP_COPY_JOB_DIR`** on shared hosts.
+- **Copy job IDs** in `/api/copy/jobs/:id` must be UUIDs (prevents path traversal via `..` in the URL segment).
+- **TLS:** IMAP defaults to **verify server certificates** (`tlsRejectUnauthorized` / `IMAP_TLS_REJECT_UNAUTHORIZED`); disable only for deliberate lab use.
 
 **Dev:** terminal 1 `imap-tool ui`; terminal 2 `cd ui && npm run dev` (Vite proxies `/api` → `127.0.0.1:3847`).
 
@@ -151,7 +162,7 @@ Example `migrate.json`:
 ```
 
 - **First run** needs `--spec`; later runs on the same `--store` reuse the embedded spec (omit `--spec` or pass the same file).
-- **Destination mailboxes** must exist (or be created by your host) before `APPEND`; the tool does not create folders yet.
+- **Destination mailboxes** are created automatically when needed (**IMAP CREATE** for each missing hierarchy level, using the server’s LIST delimiter). If creation is denied by ACL or policy, fix permissions or create folders manually.
 - **Interrupt:** `SIGINT` finishes in-flight messages then exits; run `copy run` again to continue from the store.
 - **Duplicates:** if the destination already has the same **Message-ID** and **RFC822.SIZE**, the row is verified and marked done without a second append when possible.
 
@@ -182,16 +193,16 @@ Fingerprints use `messageId` + `rfc822Size` + `internalDate` (see `fingerprintWe
 | **G** — Streaming hash (lower peak memory per message), explicit **APPENDLIMIT** handling, tuned stress on huge folders | **Partial** — APPEND size/limit errors get a clearer message; peak memory is still ~`concurrency × largest message` (ImapFlow returns full `source` buffers). |
 | **H** — Web UI `/copy` + copy job HTTP API | **Done** — `POST /api/copy/jobs`, `GET /api/copy/jobs`, `GET /api/copy/jobs/:id`, `POST .../run`, `pause`, `resume`, `stop`. |
 
-## Integration tests
+## Tests
 
-If `IMAP_TEST_HOST`, `IMAP_TEST_USER`, and `IMAP_TEST_PASS` are set, additional tests can be enabled (see `test/`).
+Unit tests live under **`test/`** (checkpoint store, copy spec parsing, IMAP error formatting, comparisons, report schema). There are **no live IMAP integration tests in CI**; validate against a lab mailbox when changing client behavior.
 
 ## Library
 
 Import from `imap-tool` after build:
 
 ```ts
-import { SCHEMA_VERSION } from "imap-tool";
+import { SCHEMA_VERSION, runCopyJob, type CopySpecFileV1 } from "imap-tool";
 ```
 
-Public exports are intentionally small; see `src/index.ts`.
+Public exports are listed in **`src/index.ts`** (reports, scan/compare helpers, IMAP config, **`runCopyJob`** and other copy helpers from `src/copy/`).

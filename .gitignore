@@ -1,7 +1,32 @@
+# Dependencies
 node_modules/
+ui/node_modules/
+
+# Build output
 dist/
 ui/dist/
-ui/node_modules/
+*.tsbuildinfo
+
+# Environment — never commit secrets (example file is tracked)
 .env
+.env.*
+!.env.example
+
+# Logs & coverage
 *.log
 coverage/
+
+# SQLite checkpoints (copy jobs, local experiments)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors (optional; remove if your team commits IDE config)
+.idea/
+
+# Local agent / scratch docs (not product source)
+AGENTS.md
