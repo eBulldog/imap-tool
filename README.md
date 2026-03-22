@@ -15,7 +15,7 @@ npm install
 npm run build
 ```
 
-Run via `npx imap-tool` from this directory after build, or `npm link` for a global command.
+Run via `npx imap-tool` from this directory after build, or `npm link` for a global command. The file `bin/imap-tool.js` must be **executable** (`chmod +x bin/imap-tool.js`); otherwise `npx imap-tool` can report `Permission denied`. You can always run **`node bin/imap-tool.js …`** instead.
 
 ### Web UI (dual-server dashboard)
 
