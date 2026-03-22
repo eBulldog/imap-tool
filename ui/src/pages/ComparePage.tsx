@@ -221,8 +221,9 @@ export default function ComparePage() {
         <h1>Server compare</h1>
         <p className="sub">
           Two IMAP accounts side by side: capabilities, folders (STATUS), and a bounded UID slice for
-          message-set comparison. Credentials are sent to this app over HTTP — prefer a trusted LAN
-          or terminate TLS in front of the UI server when you can.
+          message-set comparison. For verified migration copy (FETCH → hash → APPEND → verify), use{" "}
+          <Link to="/copy">Copy</Link>. Credentials are sent to this app over HTTP — prefer a trusted
+          LAN or terminate TLS in front of the UI server when you can.
         </p>
       </header>
 

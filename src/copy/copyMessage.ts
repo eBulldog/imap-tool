@@ -177,12 +177,21 @@ export async function processCopyItem(
       return;
     }
 
-    const appendRes = await dest.append(
-      row.destMailbox,
-      fetched.raw,
-      flagsForAppend(fetched.flags),
-      fetched.internalDate
-    );
+    let appendRes: Awaited<ReturnType<ImapFlow["append"]>>;
+    try {
+      appendRes = await dest.append(
+        row.destMailbox,
+        fetched.raw,
+        flagsForAppend(fetched.flags),
+        fetched.internalDate
+      );
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      if (/APPENDLIMIT|too large|maximum.*append|literal.*big/i.test(m)) {
+        throw new Error(`APPEND rejected (provider size/limit): ${m}`);
+      }
+      throw e;
+    }
 
     if (!appendRes || appendRes.uid == null) {
       const found = await findDestUidByMessageId(

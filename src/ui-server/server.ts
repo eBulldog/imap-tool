@@ -12,6 +12,7 @@ import { listMailboxesWithStatus } from "../scan/listMailboxes.js";
 import { scanMailboxMetadata } from "../scan/scanMailbox.js";
 import { allCatalogEntries, enrichCapabilities } from "./capabilitiesCatalog.js";
 import { resolvedFromBody } from "./connBody.js";
+import { registerCopyRoutes } from "./copyRoutes.js";
 
 export interface UiServerOptions {
   passwordEnv?: string;
@@ -337,6 +338,8 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<void
       compare,
     };
   });
+
+  registerCopyRoutes(app);
 
   await app.register(fastifyStatic, {
     root,

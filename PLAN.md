@@ -218,6 +218,7 @@ Adjustments require updating this section of **PLAN.md** so other agents do not 
 | 2026-03-21 | Web UI v2: dual-server forms, capability catalog, live folder/message compare, message viewer + `viewerPreset` link | Supports UC-1/UC-2 visually; HTTPS front-end deferred to deployment. |
 | 2026-03-21 | **Bulletproof copy** as additive track (§10): **two-host** pipeline hash→APPEND→verify, checkpointed jobs, `/copy` UI + CLI; does not replace read-only compare. | UC-2 demands octet-level proof across **separate** servers; pause/resume and parallelism are operational requirements. |
 | 2026-03-21 | Copy scoped for **provider migration** + **very large folders** | Two-host bridge; incremental checkpoints and streaming so big folders are first-class, not a special case. |
+| 2026-03-22 | **§10 Phase H:** `/copy` UI + Fastify `/api/copy/jobs*` | Operator can run verified copy from dashboard; jobs dir configurable via `IMAP_COPY_JOB_DIR`. |
 
 ---
 
@@ -281,8 +282,8 @@ Adjustments require updating this section of **PLAN.md** so other agents do not 
 | Phase | Scope | Acceptance (summary) |
 |-------|--------|-------------------------|
 | **F** | Library + CLI; checkpoint; single-folder map; bulletproof profile only | N-message test: all verified; corrupt verify fails; kill/resume completes without dup APPEND |
-| **G** | Pool + streaming; dest **APPENDLIMIT**; tune **N** for two-host latency; stress **one huge folder** in tests | Memory stable on **large-folder** run (e.g. 10k+ msgs); throughput scales until **either** provider or network saturates |
-| **H** | UI `/copy` + APIs | Full job from UI; pause/resume survives refresh; zero regression on `/`, `/viewer`, `/capabilities` |
+| **G** | Pool + streaming; dest **APPENDLIMIT**; tune **N** for two-host latency; stress **one huge folder** in tests | Memory stable on **large-folder** run (e.g. 10k+ msgs); throughput scales until **either** provider or network saturates — **partial:** clearer APPEND limit errors; true streaming fetch TBD. |
+| **H** | UI `/copy` + APIs | **Shipped:** `POST/GET /api/copy/jobs*`, React `/copy` (start, poll, pause/resume queue, stop, resume run). Full job from UI; pause survives refresh via SQLite; regression check on `/`, `/viewer`, `/capabilities`. |
 
 ### 10.7 Product acceptance
 

@@ -2,7 +2,7 @@
 
 TypeScript CLI and library for **IMAP metadata** (counts, sizes, UIDs, envelopes), **migration-style comparison**, and optional **verified provider-to-provider copy** (FETCH → SHA-256 → APPEND → re-FETCH → hash match, with SQLite checkpoints). It does not render email; it produces JSON reports you can diff.
 
-See `PLAN.md` for architecture, goals, and what is still planned (e.g. `/copy` UI).
+See `PLAN.md` for architecture and goals.
 
 ## Requirements
 
@@ -19,9 +19,11 @@ Run via `npx imap-tool` from this directory after build, or `npm link` for a glo
 
 ### Web UI (dual-server dashboard)
 
-React + Fastify. **Default bind `0.0.0.0`** (all IPv4); stderr lists LAN URLs. **Main page:** two independent connection forms (Server A / B), expandable **IMAP capabilities** with descriptions, **folder comparison** (LIST+STATUS), and **message comparison** (highest-UID slice + fingerprint multiset diff). **Message viewer** route: full-width aligned rows, sort by internal date, **Raw** RFC822 preview. **Capabilities** route: static glossary (`GET /api/capabilities/reference`).
+React + Fastify. **Default bind `0.0.0.0`** (all IPv4); stderr lists LAN URLs. **Main page:** two independent connection forms (Server A / B), expandable **IMAP capabilities** with descriptions, **folder comparison** (LIST+STATUS), and **message comparison** (highest-UID slice + fingerprint multiset diff). **Copy** route (`/copy`): start a **verified two-host copy** (same proof model as CLI `copy`), poll progress, pause/resume queue, stop workers, re-run after interrupt. **Message viewer** route: full-width aligned rows, sort by internal date, **Raw** RFC822 preview. **Capabilities** route: static glossary (`GET /api/capabilities/reference`).
 
-Interactive flows use **`POST /api/session/*`** and **`POST /api/compare/*`** with JSON bodies (host, user, pass, TLS flags). Passwords are sent to your imap-tool process over **HTTP** unless you terminate TLS in front — use a trusted LAN or put nginx/Caddy in front for HTTPS.
+Interactive flows use **`POST /api/session/*`**, **`POST /api/compare/*`**, and **`/api/copy/jobs*`** with JSON bodies (host, user, pass, TLS flags). Passwords are sent to your imap-tool process over **HTTP** unless you terminate TLS in front — use a trusted LAN or put nginx/Caddy in front for HTTPS.
+
+Copy jobs persist under **`IMAP_COPY_JOB_DIR`** (default: a subdirectory of the system temp dir, e.g. `/tmp/imap-tool-copy-jobs` on Linux). Each job is a UUID folder with `spec.json` and `job.sqlite`.
 
 ```bash
 npm run build:all
@@ -32,6 +34,7 @@ Optional **CLI-style env** still powers `GET /api/ping`, `GET /api/mailboxes`, `
 
 - **`IMAP_UI_PORT`** — port (default `3847`).
 - **`IMAP_UI_HOST=127.0.0.1`** — loopback-only bind.
+- **`IMAP_COPY_JOB_DIR`** — directory for UI/HTTP copy job files (`spec.json`, `job.sqlite` per job UUID).
 
 LAN exposure includes **`/api/*`**; firewall or `IMAP_UI_HOST` if needed.
 
@@ -165,8 +168,8 @@ Library entrypoints: `runCopyJob`, `readCopyStatus`, `openCopyCheckpointStore`, 
 
 **Verified copy inside this tool**
 
-1. Prepare `migrate.json` (source, destination, `folders` map).
-2. `imap-tool copy run --spec migrate.json --store job.sqlite` (repeat until all rows are `done` or review `failed` via `copy status`).
+1. **CLI:** prepare `migrate.json` (source, destination, `folders` map), then `imap-tool copy run --spec migrate.json --store job.sqlite` (repeat until all rows are `done` or review `failed` via `copy status`).
+2. **UI:** `npm run build:all`, `imap-tool ui`, open **`/copy`** — Server A = source, Server B = destination, edit folder JSON, **Start copy job**. Use **List jobs** after a server restart, then **Start / resume run** on the same job id.
 3. Optionally still run **`scan-all` + `compare`** on both sides for a mailbox-level diff.
 
 Fingerprints use `messageId` + `rfc822Size` + `internalDate` (see `fingerprintWeak` in JSON). Duplicate `Message-ID` headers are possible; use `--content-sha256` on scans when you need byte-level identity from reports alone (expensive). The **`copy`** command always hashes full RFC822 for each migrated message.
@@ -176,8 +179,8 @@ Fingerprints use `messageId` + `rfc822Size` + `internalDate` (see `fingerprintWe
 | Phase | Status |
 |-------|--------|
 | **F** — Library + CLI + SQLite checkpoints + bulletproof profile | **Done** (unit tests cover the store; use a real lab for end-to-end kill/resume). |
-| **G** — Streaming hash (lower peak memory per message), explicit **APPENDLIMIT** handling, tuned stress on huge folders | **Not done** — concurrency bounds memory today (`workers × largest message`). |
-| **H** — Web UI `/copy` + `GET /api/copy/jobs/:id` (and related APIs) | **Not done** — copy is CLI + library only for now. |
+| **G** — Streaming hash (lower peak memory per message), explicit **APPENDLIMIT** handling, tuned stress on huge folders | **Partial** — APPEND size/limit errors get a clearer message; peak memory is still ~`concurrency × largest message` (ImapFlow returns full `source` buffers). |
+| **H** — Web UI `/copy` + copy job HTTP API | **Done** — `POST /api/copy/jobs`, `GET /api/copy/jobs`, `GET /api/copy/jobs/:id`, `POST .../run`, `pause`, `resume`, `stop`. |
 
 ## Integration tests
 
